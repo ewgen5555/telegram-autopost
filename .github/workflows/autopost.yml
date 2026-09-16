@@ -2,8 +2,8 @@ name: Telegram Autopost
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # каждый день в 09:00 UTC
-  workflow_dispatch:       # возможность ручного запуска
+    - cron: "0 9 * * *"
+  workflow_dispatch:
 
 jobs:
   autopost:
