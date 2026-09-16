@@ -20,6 +20,21 @@ SKILLS = [
 EMOJIS = ["😊", "✨", "🎯", "🤖", "🧠", "🐣", "📘", "🎲"]
 
 # -----------------------------
+# Случайные картинки (простые, рабочие)
+# -----------------------------
+
+IMAGES = [
+    "https://picsum.photos/seed/mira1/800/600",
+    "https://picsum.photos/seed/mira2/800/600",
+    "https://picsum.photos/seed/mira3/800/600",
+    "https://picsum.photos/seed/mira4/800/600",
+    "https://picsum.photos/seed/mira5/800/600",
+]
+
+def get_random_image():
+    return random.choice(IMAGES)
+
+# -----------------------------
 # Шаблоны игр
 # -----------------------------
 
@@ -74,12 +89,11 @@ STORY_TEMPLATES = [
 ]
 
 # -----------------------------
-# Генерация поста
+# Генерация постов
 # -----------------------------
 
 def generate_game():
-    template = random.choice(GAME_TEMPLATES)
-    return template.format(
+    return GAME_TEMPLATES[random.randint(0, len(GAME_TEMPLATES)-1)].format(
         n=random.randint(3, 6),
         place=random.choice(PLACES),
         obj1=random.choice(OBJECTS),
@@ -90,10 +104,9 @@ def generate_game():
     )
 
 def generate_task():
-    template = random.choice(TASK_TEMPLATES)
     letter = random.choice(LETTERS)
     words = WORDS_BY_LETTER[letter]
-    return template.format(
+    return TASK_TEMPLATES[random.randint(0, len(TASK_TEMPLATES)-1)].format(
         letter=letter,
         word1=words[0],
         word2=words[1],
@@ -105,31 +118,41 @@ def generate_task():
     )
 
 def generate_tip():
-    template = random.choice(TIP_TEMPLATES)
-    return template.format(emoji=random.choice(EMOJIS))
+    return TIP_TEMPLATES[random.randint(0, len(TIP_TEMPLATES)-1)].format(
+        emoji=random.choice(EMOJIS)
+    )
 
 def generate_story():
-    template = random.choice(STORY_TEMPLATES)
-    return template.format(emoji=random.choice(EMOJIS))
+    return STORY_TEMPLATES[random.randint(0, len(STORY_TEMPLATES)-1)].format(
+        emoji=random.choice(EMOJIS)
+    )
 
 # -----------------------------
-# Главная функция
+# Умный генератор
 # -----------------------------
 
 def generate_post():
     category = random.choice(["game", "task", "tip", "story"])
 
+    text = None
+    image = None
+
+    if category in ["game", "tip", "story"]:
+        image = get_random_image()
+
     if category == "game":
-        return generate_game()
-    if category == "task":
-        return generate_task()
-    if category == "tip":
-        return generate_tip()
-    if category == "story":
-        return generate_story()
+        text = generate_game()
+    elif category == "task":
+        text = generate_task()
+    elif category == "tip":
+        text = generate_tip()
+    elif category == "story":
+        text = generate_story()
 
-    return "Сегодня маленькое задание для развития внимания 😊"
-
+    return {
+        "text": text,
+        "image": image
+    }
 
 if __name__ == "__main__":
     print(generate_post())
