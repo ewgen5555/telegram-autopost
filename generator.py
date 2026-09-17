@@ -1,5 +1,7 @@
 import random
 
+from images import get_image_for_category
+
 # -----------------------------
 # Вариативные элементы
 # -----------------------------
@@ -18,21 +20,6 @@ SKILLS = [
 ]
 
 EMOJIS = ["😊", "✨", "🎯", "🤖", "🧠", "🐣", "📘", "🎲"]
-
-# -----------------------------
-# Случайные картинки (простые, рабочие)
-# -----------------------------
-
-IMAGES = [
-    "https://picsum.photos/seed/mira1/800/600",
-    "https://picsum.photos/seed/mira2/800/600",
-    "https://picsum.photos/seed/mira3/800/600",
-    "https://picsum.photos/seed/mira4/800/600",
-    "https://picsum.photos/seed/mira5/800/600",
-]
-
-def get_random_image():
-    return random.choice(IMAGES)
 
 # -----------------------------
 # Шаблоны игр
@@ -135,10 +122,7 @@ def generate_post():
     category = random.choice(["game", "task", "tip", "story"])
 
     text = None
-    image = None
-
-    if category in ["game", "tip", "story"]:
-        image = get_random_image()
+    image = get_image_for_category(category)
 
     if category == "game":
         text = generate_game()
