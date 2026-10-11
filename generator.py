@@ -3,11 +3,11 @@ import random
 import re
 import requests
 
-from images import get_image_for_character
+from images import get_character_for_today, get_image_for_post
 
-# -----------------------------
+# -------------------------------------------------------------
 # Mercury 2.5 (Inception) config
-# -----------------------------
+# -------------------------------------------------------------
 
 INCEPTION_API_KEY = os.environ.get("INCEPTION_API_KEY", "").strip()
 INCEPTION_URL = "https://api.inceptionlabs.ai/v1/chat/completions"
@@ -16,7 +16,7 @@ INCEPTION_MODEL = "mercury-2.5"
 SYSTEM_PROMPT = """Ты пишешь посты для Telegram-канала «Игры и Развитие 3–7» (@kids_brain_37).
 
 Стиль:
-- Два персонажа: Мира (девочка) и Тима (мальчик). В каждом посте используй ОДНОГО из них (или обоих только в историях/фантазии).
+- Два персонажа: Мира (девочка) и Тима (мальчик). В каждом посте используй ТОЛЬКО указанного персонажа.
 - Текст обращён к РОДИТЕЛЯМ: мягкий добрый сарказм, без злости и без морализаторства.
 - Акцент на «минуты тишины» / паузу для родителя, пока ребёнок занят.
 - Коротко, живо, по делу. Без воды и канцелярита.
@@ -38,9 +38,9 @@ SYSTEM_PROMPT = """Ты пишешь посты для Telegram-канала «�
 
 Пиши только текст поста на русском. Без кавычек вокруг всего текста. Без markdown-заголовков #."""
 
-# -----------------------------
+# -------------------------------------------------------------
 # Вариативные элементы (для fallback)
-# -----------------------------
+# -------------------------------------------------------------
 
 OBJECTS = [
     "мяч", "кубик", "книга", "ложка", "машинка", "фломастер",
@@ -135,9 +135,9 @@ def _two_skills():
     return random.sample(SKILLS, 2)
 
 
-# -----------------------------
+# -------------------------------------------------------------
 # Mercury generation
-# -----------------------------
+# -------------------------------------------------------------
 
 def _call_mercury(category: str, character: str):
     if not INCEPTION_API_KEY:
@@ -148,7 +148,7 @@ def _call_mercury(category: str, character: str):
     time = random.choice(TIMES)
 
     user_prompt = f"""Напиши один пост категории «{category}».
-Персонаж: {character} (если tip — персонаж опционален).
+Персонаж: {character} (если tip — персонаж опционален, но если упоминаешь — только {character}).
 Возраст: {age}.
 Время занятия: примерно {time}.
 Навыки: {skill1}, {skill2}.
@@ -190,9 +190,9 @@ def _detect_skill_from_text(text: str):
     return None
 
 
-# -----------------------------
+# -------------------------------------------------------------
 # Template fallback
-# -----------------------------
+# -------------------------------------------------------------
 
 GAME_TEMPLATES = [
     """🎯 Пока ребёнок считает шаги — у тебя {time} тишины
@@ -324,10 +324,10 @@ STORY_TEMPLATES = [
 ]
 
 
-def generate_game_template():
+def generate_game_template(character_name: str):
     age = random.choice(AGES)
     skill1, skill2 = _two_skills()
-    char = random.choice(list(CHARACTERS.values()))
+    char = CHARACTERS[character_name]
     objs = random.sample(OBJECTS, 3)
     text = random.choice(GAME_TEMPLATES).format(
         n=random.randint(3, 6),
@@ -345,10 +345,10 @@ def generate_game_template():
     return text, char["name"], skill1, age
 
 
-def generate_task_template():
+def generate_task_template(character_name: str):
     age = random.choice(AGES)
     skill1, skill2 = _two_skills()
-    char = random.choice(list(CHARACTERS.values()))
+    char = CHARACTERS[character_name]
     letter = random.choice(LETTERS)
     words = WORDS_BY_LETTER[letter]
     text = random.choice(TASK_TEMPLATES).format(
@@ -372,9 +372,14 @@ def generate_tip_template():
     return text, None, None, None
 
 
-def generate_story_template():
+def generate_story_template(character_name: str):
+    # подставляем нужного персонажа в шаблон истории
     text = random.choice(STORY_TEMPLATES)
-    return text, None, None, None
+    if character_name == "Мира":
+        text = text.replace("Тима", "Мира")
+    else:
+        text = text.replace("Мира", "Тима")
+    return text, character_name, None, None
 
 
 def generate_post():
@@ -384,13 +389,14 @@ def generate_post():
         k=1,
     )[0]
 
-    character = random.choice(["Мира", "Тима"])
+    # Жёсткое чередование по дням
+    character = get_character_for_today()
     text = None
     skill = None
     age = None
 
     if INCEPTION_API_KEY:
-        print(f"[mercury] генерирую категорию={category}, персонаж={character}...")
+        print(f"[mercury] генерирую категорию={category}, персонаж={character} (день)...")
         text = _call_mercury(category, character)
         if text:
             skill = _detect_skill_from_text(text)
@@ -400,21 +406,23 @@ def generate_post():
 
     if not text:
         if category == "game":
-            text, character, skill, age = generate_game_template()
+            text, character, skill, age = generate_game_template(character)
         elif category == "task":
-            text, character, skill, age = generate_task_template()
+            text, character, skill, age = generate_task_template(character)
         elif category == "tip":
             text, character, skill, age = generate_tip_template()
+            # для tip персонаж всё равно нужен для картинки
+            character = get_character_for_today()
         else:
-            text, character, skill, age = generate_story_template()
+            text, character, skill, age = generate_story_template(character)
 
     if character is None:
-        character = random.choice(["Мира", "Тима"])
+        character = get_character_for_today()
 
     hashtags = make_hashtags(category, skill, age)
     full_text = text.rstrip() + "\n\n" + hashtags
 
-    image = get_image_for_character(
+    image = get_image_for_post(
         character=character,
         category=category,
         text=full_text,
