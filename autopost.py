@@ -16,7 +16,10 @@ def main():
         print("\n===== Сгенерированный пост =====")
         print(text)
         print("===============================")
-        print("Картинка:", image)
+        if isinstance(image, bytes):
+            print(f"Картинка: bytes ({len(image)} байт)")
+        else:
+            print("Картинка:", image)
 
         print("\nОтправляю в Telegram...")
         result = publish(text, image)

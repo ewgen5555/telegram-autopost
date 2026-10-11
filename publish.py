@@ -12,19 +12,36 @@ def get_env(name: str) -> str:
 TOKEN = get_env("TELEGRAM_BOT_TOKEN")
 CHAT_ID = get_env("TELEGRAM_CHANNEL_ID")
 
-def publish(text: str, image_url: str | None = None) -> dict:
+
+def publish(text: str, image: str | bytes | None = None) -> dict:
     """
     Отправляет пост в Telegram-канал.
-    Возвращает ответ API или выбрасывает исключение при ошибке.
+    image:
+      - str  → URL картинки (sendPhoto с photo=url)
+      - bytes → файл (sendPhoto multipart)
+      - None → только текст
     """
     try:
-        if image_url:
+        if isinstance(image, bytes):
+            # Картинка как файл — без внешнего хостинга
             response = requests.post(
                 f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
                 data={
                     "chat_id": CHAT_ID,
                     "caption": text,
-                    "photo": image_url,
+                },
+                files={
+                    "photo": ("image.jpg", image, "image/jpeg"),
+                },
+                timeout=60,
+            )
+        elif isinstance(image, str) and image:
+            response = requests.post(
+                f"https://api.telegram.org/bot{TOKEN}/sendPhoto",
+                data={
+                    "chat_id": CHAT_ID,
+                    "caption": text,
+                    "photo": image,
                 },
                 timeout=30,
             )
@@ -53,6 +70,7 @@ def publish(text: str, image_url: str | None = None) -> dict:
         raise RuntimeError("Таймаут при запросе к Telegram API")
     except requests.exceptions.RequestException as e:
         raise RuntimeError(f"Ошибка сети при отправке в Telegram: {e}")
+
 
 if __name__ == "__main__":
     post_text = os.environ.get(

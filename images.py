@@ -1,11 +1,8 @@
 import os
-import re
 import base64
 import random
-import tempfile
 import requests
 from datetime import date
-from pathlib import Path
 
 # -------------------------------------------------------------
 # AITUNNEL + Seedream 5.0 Flash
@@ -14,12 +11,6 @@ AITUNNEL_API_KEY = os.environ.get("AITUNNEL_API_KEY", "").strip()
 AITUNNEL_URL = "https://api.aitunnel.ru/v1/images/generations"
 IMAGE_MODEL = "seedream-5-0-flash"
 
-# Временный хостинг для base64 → публичный URL
-LITTERBOX_UPLOAD = "https://litterbox.catbox.moe/resources/internals/api.php"
-
-# -------------------------------------------------------------
-# Фиксированные описания персонажей
-# -------------------------------------------------------------
 CHARACTER_DESC = {
     "Мира": (
         "a cute 5-6 year old girl named Mira, short light brown hair with a small bow, "
@@ -101,6 +92,8 @@ def _extract_scene_objects(text: str) -> list[str]:
         ("звук", "listening to sounds with eyes closed"),
         ("красн", "looking for red objects"),
         ("предмет", "various household objects around him"),
+        ("диван", "looking under a sofa"),
+        ("карту", "drawing a treasure map on paper"),
     ]
     found = []
     for ru, en in keywords:
@@ -125,38 +118,20 @@ def build_image_prompt(character: str, category: str, post_text: str) -> str:
         }
         action = defaults.get(category, "in a cozy home room with toys around")
 
-    prompt = (
+    return (
         f"{desc}, {action}. "
         f"Full body visible, environment and props must be clearly seen. "
         f"{STYLE_SUFFIX}"
     )
-    return prompt
 
 
-def _upload_to_litterbox(image_bytes: bytes, filename: str = "post.jpg") -> str | None:
-    """Заливаем картинку на litterbox (живёт ~72ч), получаем публичный URL."""
-    try:
-        files = {
-            "fileToUpload": (filename, image_bytes, "image/jpeg"),
-        }
-        data = {
-            "reqtype": "fileupload",
-            "time": "72h",
-        }
-        r = requests.post(LITTERBOX_UPLOAD, files=files, data=data, timeout=60)
-        r.raise_for_status()
-        url = r.text.strip()
-        if url.startswith("http"):
-            print(f"[images] залито на litterbox: {url}")
-            return url
-        print(f"[images] неожиданный ответ litterbox: {url[:200]}")
-        return None
-    except Exception as e:
-        print(f"[images] ошибка загрузки на litterbox: {e}")
-        return None
-
-
-def _call_seedream(prompt: str) -> str | None:
+def _call_seedream(prompt: str) -> bytes | str | None:
+    """
+    Возвращает:
+      - bytes  — сырая картинка (из b64_json)
+      - str    — публичный URL
+      - None   — ошибка
+    """
     if not AITUNNEL_API_KEY:
         print("[images] AITUNNEL_API_KEY не задан")
         return None
@@ -186,25 +161,19 @@ def _call_seedream(prompt: str) -> str | None:
 
         item = items[0]
 
-        # 1) Готовый URL
         url = item.get("url")
         if url:
             print(f"[images] готово (url): {url[:80]}...")
             return url
 
-        # 2) Base64 → заливаем на litterbox
         b64 = item.get("b64_json")
         if b64:
-            print("[images] получен b64_json, заливаю на litterbox...")
-            # убрать возможный data:image/...;base64, префикс
+            print("[images] получен b64_json, декодирую...")
             if "," in b64 and b64.strip().startswith("data:"):
                 b64 = b64.split(",", 1)[1]
             image_bytes = base64.b64decode(b64)
-            uploaded = _upload_to_litterbox(image_bytes)
-            if uploaded:
-                return uploaded
-            print("[images] не удалось залить b64")
-            return None
+            print(f"[images] готово (bytes): {len(image_bytes)} байт")
+            return image_bytes
 
         print(f"[images] неизвестный формат ответа: {list(item.keys())}")
         return None
@@ -214,13 +183,17 @@ def _call_seedream(prompt: str) -> str | None:
         return None
 
 
-def get_image_for_post(character: str, category: str, text: str) -> str:
+def get_image_for_post(character: str, category: str, text: str) -> bytes | str:
+    """
+    Возвращает bytes (файл) или str (URL).
+    При ошибке API — fallback URL старого портрета.
+    """
     prompt = build_image_prompt(character, category, text)
     print(f"[images] prompt: {prompt[:220]}...")
 
-    url = _call_seedream(prompt)
-    if url:
-        return url
+    result = _call_seedream(prompt)
+    if result is not None:
+        return result
 
     fallbacks = FALLBACK_URLS.get(character) or FALLBACK_URLS["Мира"]
     chosen = random.choice(fallbacks)
@@ -228,5 +201,5 @@ def get_image_for_post(character: str, category: str, text: str) -> str:
     return chosen
 
 
-def get_image_for_character(character: str, mood: str = None, category: str = "game", text: str = "") -> str:
+def get_image_for_character(character: str, mood: str = None, category: str = "game", text: str = "") -> bytes | str:
     return get_image_for_post(character, category, text)
