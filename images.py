@@ -1,5 +1,6 @@
 import os
 import base64
+import hashlib
 import random
 import time
 import requests
@@ -12,9 +13,8 @@ AITUNNEL_API_KEY = os.environ.get("AITUNNEL_API_KEY", "").strip()
 AITUNNEL_URL = "https://api.aitunnel.ru/v1/images/generations"
 IMAGE_MODEL = "seedream-5-0-flash"
 
-# Сколько попыток при ошибке сети / 5xx
 MAX_RETRIES = 3
-RETRY_DELAY = 4  # секунд
+RETRY_DELAY = 4
 
 CHARACTER_DESC = {
     "Мира": (
@@ -27,7 +27,6 @@ CHARACTER_DESC = {
     ),
 }
 
-# Разнообразные комнаты и ракурсы — чтобы картинки не были однообразными
 ROOMS = [
     "cozy living room with a sofa and a window with daylight",
     "bright children's room with a small table and toy shelf",
@@ -59,6 +58,20 @@ STYLE_SUFFIX = (
     "camera pulled back, medium-wide angle, bright gentle colors, "
     "cozy home interior, no text, no letters, no watermarks, no logos"
 )
+
+# Старые портреты — используем только как один из вариантов, не единственный
+CHARACTER_FALLBACKS = {
+    "Мира": [
+        "https://litter.catbox.moe/m9qmlz.jpg",
+        "https://litter.catbox.moe/gptjs0.jpg",
+        "https://litter.catbox.moe/vrv539.jpg",
+        "https://litter.catbox.moe/jbgzbw.jpg",
+        "https://litter.catbox.moe/yjhijn.jpg",
+    ],
+    "Тима": [
+        "https://litter.catbox.moe/ouuzdw.jpg",
+    ],
+}
 
 
 def get_character_for_today() -> str:
@@ -136,7 +149,6 @@ def build_image_prompt(character: str, category: str, post_text: str) -> str:
         }
         action = f"in a {room}, {defaults.get(category, 'playing with toys')}"
 
-    # Добавляем случайный мелкий проп для разнообразия
     extra_props = [
         "a few colorful building blocks on the floor",
         "a soft toy nearby",
@@ -154,15 +166,37 @@ def build_image_prompt(character: str, category: str, post_text: str) -> str:
     )
 
 
+def _seed_from_post(character: str, category: str, text: str) -> str:
+    """Уникальный seed на каждый пост — разные fallback-картинки."""
+    raw = f"{date.today().isoformat()}|{character}|{category}|{(text or '')[:80]}"
+    return hashlib.md5(raw.encode()).hexdigest()[:12]
+
+
+def _varied_fallback_url(character: str, category: str, text: str) -> str:
+    """
+    Разные картинки каждый день/пост.
+    1) Иногда — портрет персонажа (если есть)
+    2) Чаще — picsum с уникальным seed (разные фото, не одно и то же)
+    """
+    seed = _seed_from_post(character, category, text)
+    portraits = CHARACTER_FALLBACKS.get(character) or []
+
+    # ~25% шанс взять портрет (если есть), иначе — уникальная картинка
+    if portraits and random.random() < 0.25:
+        idx = int(seed[:2], 16) % len(portraits)
+        url = portraits[idx]
+        print(f"[images] fallback портрет → {url}")
+        return url
+
+    # Уникальная картинка по seed (каждый пост другая)
+    url = f"https://picsum.photos/seed/{seed}/1024/1024"
+    print(f"[images] fallback picsum seed={seed} → {url}")
+    return url
+
+
 def _call_seedream(prompt: str) -> bytes | str | None:
-    """
-    Возвращает:
-      - bytes  — сырая картинка (из b64_json)
-      - str    — публичный URL
-      - None   — ошибка после всех попыток
-    """
     if not AITUNNEL_API_KEY:
-        print("[images] КРИТИЧНО: AITUNNEL_API_KEY не задан в secrets")
+        print("[images] AITUNNEL_API_KEY не задан — сразу fallback")
         return None
 
     payload = {
@@ -187,7 +221,6 @@ def _call_seedream(prompt: str) -> bytes | str | None:
                 body_preview = (r.text or "")[:300]
                 print(f"[images] HTTP {r.status_code}: {body_preview}")
                 last_error = f"HTTP {r.status_code}"
-                # 401/403 — ключ плохой, нет смысла ретраить
                 if r.status_code in (401, 403, 402):
                     break
                 time.sleep(RETRY_DELAY)
@@ -217,8 +250,8 @@ def _call_seedream(prompt: str) -> bytes | str | None:
                 print(f"[images] готово (bytes): {len(image_bytes)} байт")
                 return image_bytes
 
-            print(f"[images] неизвестный формат ответа: {list(item.keys())}")
-            last_error = "unknown response format"
+            print(f"[images] неизвестный формат: {list(item.keys())}")
+            last_error = "unknown format"
             break
 
         except requests.exceptions.Timeout:
@@ -230,14 +263,14 @@ def _call_seedream(prompt: str) -> bytes | str | None:
             last_error = str(e)
             time.sleep(RETRY_DELAY)
 
-    print(f"[images] все попытки исчерпаны. Последняя ошибка: {last_error}")
+    print(f"[images] Seedream не сработал ({last_error}) → fallback")
     return None
 
 
 def get_image_for_post(character: str, category: str, text: str) -> bytes | str:
     """
-    Возвращает bytes или URL.
-    Если API недоступен — поднимает RuntimeError (чтобы workflow падал, а не ставил одну и ту же картинку).
+    Всегда возвращает картинку.
+    Сначала Seedream, при любой ошибке — разный fallback (не одна и та же).
     """
     prompt = build_image_prompt(character, category, text)
     print(f"[images] prompt: {prompt[:250]}...")
@@ -246,12 +279,7 @@ def get_image_for_post(character: str, category: str, text: str) -> bytes | str:
     if result is not None:
         return result
 
-    # Больше не используем старые одинаковые портреты — лучше упасть, чем однообразие
-    raise RuntimeError(
-        "Не удалось сгенерировать картинку через Seedream после всех попыток. "
-        "Проверь AITUNNEL_API_KEY и баланс. Workflow остановлен специально, "
-        "чтобы не публиковать одну и ту же картинку каждый день."
-    )
+    return _varied_fallback_url(character, category, text)
 
 
 def get_image_for_character(character: str, mood: str = None, category: str = "game", text: str = "") -> bytes | str:
