@@ -7,11 +7,11 @@ import requests
 from datetime import date
 
 # -------------------------------------------------------------
-# AITUNNEL + Seedream 5.0 Flash
+# AITUNNEL + Seedream 4.5
 # -------------------------------------------------------------
 AITUNNEL_API_KEY = os.environ.get("AITUNNEL_API_KEY", "").strip()
 AITUNNEL_URL = "https://api.aitunnel.ru/v1/images/generations"
-IMAGE_MODEL = "seedream-5-0-flash"
+IMAGE_MODEL = "seedream-4.5"
 
 MAX_RETRIES = 3
 RETRY_DELAY = 4
@@ -59,7 +59,6 @@ STYLE_SUFFIX = (
     "cozy home interior, no text, no letters, no watermarks, no logos"
 )
 
-# Старые портреты — используем только как один из вариантов, не единственный
 CHARACTER_FALLBACKS = {
     "Мира": [
         "https://litter.catbox.moe/m9qmlz.jpg",
@@ -75,7 +74,6 @@ CHARACTER_FALLBACKS = {
 
 
 def get_character_for_today() -> str:
-    """Чётный день месяца → Мира, нечётный → Тима."""
     day = date.today().day
     return "Мира" if day % 2 == 0 else "Тима"
 
@@ -167,28 +165,20 @@ def build_image_prompt(character: str, category: str, post_text: str) -> str:
 
 
 def _seed_from_post(character: str, category: str, text: str) -> str:
-    """Уникальный seed на каждый пост — разные fallback-картинки."""
     raw = f"{date.today().isoformat()}|{character}|{category}|{(text or '')[:80]}"
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
 def _varied_fallback_url(character: str, category: str, text: str) -> str:
-    """
-    Разные картинки каждый день/пост.
-    1) Иногда — портрет персонажа (если есть)
-    2) Чаще — picsum с уникальным seed (разные фото, не одно и то же)
-    """
     seed = _seed_from_post(character, category, text)
     portraits = CHARACTER_FALLBACKS.get(character) or []
 
-    # ~25% шанс взять портрет (если есть), иначе — уникальная картинка
     if portraits and random.random() < 0.25:
         idx = int(seed[:2], 16) % len(portraits)
         url = portraits[idx]
         print(f"[images] fallback портрет → {url}")
         return url
 
-    # Уникальная картинка по seed (каждый пост другая)
     url = f"https://picsum.photos/seed/{seed}/1024/1024"
     print(f"[images] fallback picsum seed={seed} → {url}")
     return url
@@ -215,10 +205,10 @@ def _call_seedream(prompt: str) -> bytes | str | None:
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             print(f"[images] попытка {attempt}/{MAX_RETRIES} через {IMAGE_MODEL}...")
-            r = requests.post(AITUNNEL_URL, headers=headers, json=payload, timeout=90)
+            r = requests.post(AITUNNEL_URL, headers=headers, json=payload, timeout=120)
 
             if r.status_code >= 400:
-                body_preview = (r.text or "")[:300]
+                body_preview = (r.text or "")[:400]
                 print(f"[images] HTTP {r.status_code}: {body_preview}")
                 last_error = f"HTTP {r.status_code}"
                 if r.status_code in (401, 403, 402):
@@ -268,10 +258,6 @@ def _call_seedream(prompt: str) -> bytes | str | None:
 
 
 def get_image_for_post(character: str, category: str, text: str) -> bytes | str:
-    """
-    Всегда возвращает картинку.
-    Сначала Seedream, при любой ошибке — разный fallback (не одна и та же).
-    """
     prompt = build_image_prompt(character, category, text)
     print(f"[images] prompt: {prompt[:250]}...")
 
