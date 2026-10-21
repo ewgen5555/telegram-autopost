@@ -1,6 +1,7 @@
 import os
 import random
 import re
+import time
 import requests
 from datetime import datetime
 
@@ -13,6 +14,9 @@ from images import get_character_for_today, get_image_for_post
 INCEPTION_API_KEY = os.environ.get("INCEPTION_API_KEY", "").strip()
 INCEPTION_URL = "https://api.inceptionlabs.ai/v1/chat/completions"
 INCEPTION_MODEL = "mercury-2.5"
+
+MAX_RETRIES = 3
+RETRY_DELAY = 3
 
 SYSTEM_PROMPT = """Ты пишешь посты для Telegram-канала «Игры и Развитие 3–7» (@kids_brain_37).
 
@@ -142,16 +146,17 @@ def _is_tea_day() -> bool:
 
 
 # -------------------------------------------------------------
-# Mercury generation
+# Mercury generation (с retry)
 # -------------------------------------------------------------
 
 def _call_mercury(category: str, character: str):
     if not INCEPTION_API_KEY:
+        print("[mercury] КРИТИЧНО: INCEPTION_API_KEY не задан в secrets")
         return None
 
     age = random.choice(AGES)
     skill1, skill2 = _two_skills()
-    time = random.choice(TIMES)
+    time_str = random.choice(TIMES)
     tea_allowed = _is_tea_day()
 
     tea_instruction = (
@@ -163,7 +168,7 @@ def _call_mercury(category: str, character: str):
     user_prompt = f"""Напиши один пост категории «{category}».
 Персонаж: {character} (если tip — персонаж опционален, но если упоминаешь — только {character}).
 Возраст: {age}.
-Время занятия: примерно {time}.
+Время занятия: примерно {time_str}.
 Навыки: {skill1}, {skill2}.
 {tea_instruction}
 Сделай пост уникальным, не копируй шаблоны один в один."""
@@ -183,17 +188,39 @@ def _call_mercury(category: str, character: str):
         "Content-Type": "application/json",
     }
 
-    try:
-        r = requests.post(INCEPTION_URL, headers=headers, json=payload, timeout=60)
-        r.raise_for_status()
-        data = r.json()
-        text = data["choices"][0]["message"]["content"].strip()
-        text = re.sub(r"^```(?:text|markdown)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
-        return text.strip()
-    except Exception as e:
-        print(f"[mercury] ошибка: {e}")
-        return None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            print(f"[mercury] попытка {attempt}/{MAX_RETRIES}...")
+            r = requests.post(INCEPTION_URL, headers=headers, json=payload, timeout=60)
+
+            if r.status_code >= 400:
+                body_preview = (r.text or "")[:400]
+                print(f"[mercury] HTTP {r.status_code}: {body_preview}")
+                last_error = f"HTTP {r.status_code}"
+                if r.status_code in (401, 403, 402):
+                    # Ключ невалидный / нет денег — ретраить бессмысленно
+                    break
+                time.sleep(RETRY_DELAY)
+                continue
+
+            data = r.json()
+            text = data["choices"][0]["message"]["content"].strip()
+            text = re.sub(r"^```(?:text|markdown)?\\s*", "", text)
+            text = re.sub(r"\\s*```$", "", text)
+            return text.strip()
+
+        except requests.exceptions.Timeout:
+            print(f"[mercury] таймаут на попытке {attempt}")
+            last_error = "timeout"
+            time.sleep(RETRY_DELAY)
+        except Exception as e:
+            print(f"[mercury] ошибка: {type(e).__name__}: {e}")
+            last_error = str(e)
+            time.sleep(RETRY_DELAY)
+
+    print(f"[mercury] все попытки исчерпаны. Последняя ошибка: {last_error}")
+    return None
 
 
 def _detect_skill_from_text(text: str):
@@ -205,7 +232,7 @@ def _detect_skill_from_text(text: str):
 
 
 # -------------------------------------------------------------
-# Template fallback
+# Template fallback (только если Mercury реально недоступен)
 # -------------------------------------------------------------
 
 GAME_TEMPLATES = [
@@ -264,7 +291,6 @@ GAME_TEMPLATES = [
 💡 Развивает: {skill}""",
 ]
 
-# Отдельный шаблон с чаем — только на «чайные» дни
 GAME_TEMPLATE_TEA = """🎯 {time} относительной тишины (работает)
 
 {name} только что обнаружил{ended}, что предметы умеют пропадать.
@@ -408,7 +434,6 @@ def generate_tip_template():
 
 
 def generate_story_template(character_name: str):
-    # подставляем нужного персонажа в шаблон истории
     text = random.choice(STORY_TEMPLATES)
     if character_name == "Мира":
         text = text.replace("Тима", "Мира")
@@ -424,20 +449,27 @@ def generate_post():
         k=1,
     )[0]
 
-    # Жёсткое чередование по дням
     character = get_character_for_today()
     text = None
     skill = None
     age = None
+    used_mercury = False
+
+    # --- Проверка ключей в начале ---
+    if not INCEPTION_API_KEY:
+        print("[mercury] КРИТИЧНО: INCEPTION_API_KEY отсутствует. Текст будет из шаблона.")
+    if not os.environ.get("AITUNNEL_API_KEY", "").strip():
+        print("[images] КРИТИЧНО: AITUNNEL_API_KEY отсутствует. Генерация картинки упадёт.")
 
     if INCEPTION_API_KEY:
-        print(f"[mercury] генерирую категорию={category}, персонаж={character} (день)...")
+        print(f"[mercury] генерирую категорию={category}, персонаж={character}...")
         text = _call_mercury(category, character)
         if text:
             skill = _detect_skill_from_text(text)
-            print("[mercury] успех")
+            used_mercury = True
+            print("[mercury] успех — токены списаны")
         else:
-            print("[mercury] fallback на шаблоны")
+            print("[mercury] fallback на шаблоны (токены не списаны)")
 
     if not text:
         if category == "game":
@@ -446,7 +478,6 @@ def generate_post():
             text, character, skill, age = generate_task_template(character)
         elif category == "tip":
             text, character, skill, age = generate_tip_template()
-            # для tip персонаж всё равно нужен для картинки
             character = get_character_for_today()
         else:
             text, character, skill, age = generate_story_template(character)
@@ -457,6 +488,7 @@ def generate_post():
     hashtags = make_hashtags(category, skill, age)
     full_text = text.rstrip() + "\n\n" + hashtags
 
+    # Картинка: теперь при ошибке поднимет RuntimeError → workflow упадёт
     image = get_image_for_post(
         character=character,
         category=category,
@@ -468,6 +500,7 @@ def generate_post():
         "image": image,
         "category": category,
         "character": character,
+        "used_mercury": used_mercury,
     }
 
 
@@ -477,4 +510,5 @@ if __name__ == "__main__":
     print("\n---")
     print("Category:", post["category"])
     print("Character:", post.get("character"))
-    print("Image:", post["image"])
+    print("Used Mercury:", post.get("used_mercury"))
+    print("Image:", post["image"] if not isinstance(post["image"], bytes) else f"bytes({len(post['image'])})")
