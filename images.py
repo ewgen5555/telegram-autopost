@@ -7,7 +7,7 @@ import requests
 from datetime import date
 
 # -------------------------------------------------------------
-# AITUNNEL + Seedream 4.5
+# AITUNNEL + GPT Image 2.6 Sunburst
 # -------------------------------------------------------------
 AITUNNEL_API_KEY = os.environ.get("AITUNNEL_API_KEY", "").strip()
 AITUNNEL_URL = "https://api.aitunnel.ru/v1/images/generations"
@@ -18,12 +18,14 @@ RETRY_DELAY = 4
 
 CHARACTER_DESC = {
     "Мира": (
-        "a cute 5-6 year old girl named Mira, short light brown hair with a small bow, "
-        "big friendly brown eyes, soft rosy cheeks, pastel yellow dress and white sneakers"
+        "cute 5-6 year old girl named Mira, short light brown bob hair with a small patterned bow, "
+        "very large round brown eyes, soft rosy cheeks, gentle smile, "
+        "pastel yellow dress with short puffy sleeves and white collar, white socks and white sneakers"
     ),
     "Тима": (
-        "a cute 5-6 year old boy named Tima, short messy light brown hair, "
-        "big curious brown eyes, freckles, light blue t-shirt, beige shorts and sneakers"
+        "cute 5-6 year old boy named Tima, short messy light brown hair, "
+        "very large round curious brown eyes, light freckles, soft smile, "
+        "light blue t-shirt, beige shorts, white socks and sneakers"
     ),
 }
 
@@ -51,8 +53,11 @@ LIGHTING = [
 ]
 
 STYLE_SUFFIX = (
-    "children's book illustration style, full scene composition, "
-    "character is part of the environment, room and objects clearly visible, "
+    "soft anime children's illustration style, clean line art, soft cel shading, "
+    "large expressive eyes, cute proportions, gentle pastel color palette, "
+    "warm cozy atmosphere, soft diffused lighting, "
+    "full scene composition, character is part of the environment, room and objects clearly visible, "
+    "NOT photorealistic, NOT realistic photo, NOT 3D render, NOT western cartoon, "
     "NOT a portrait, NOT a close-up face, NOT head and shoulders only, "
     "NOT cropped at the waist, full body or three-quarter body must be visible, "
     "camera pulled back, medium-wide angle, bright gentle colors, "
@@ -82,7 +87,7 @@ def _extract_scene_objects(text: str) -> list[str]:
     text_l = (text or "").lower()
     keywords = [
         ("носк", "colorful socks on the floor"),
-        ("пуговиц", "a small button in his hands"),
+        ("пуговиц", "a small button in her hands"),
         ("коробк", "an open cardboard box with toys inside"),
         ("чемодан", "an old suitcase"),
         ("простын", "a bedsheet tent"),
@@ -159,7 +164,7 @@ def build_image_prompt(character: str, category: str, post_text: str) -> str:
     return (
         f"{desc}, {action}, {extra}. "
         f"{angle}, {light}. "
-        f"Full body visible, environment and props must be clearly seen. "
+        f"Full body of the child clearly visible in the room, environment and props must be seen. "
         f"{STYLE_SUFFIX}"
     )
 
@@ -253,7 +258,7 @@ def _call_seedream(prompt: str) -> bytes | str | None:
             last_error = str(e)
             time.sleep(RETRY_DELAY)
 
-    print(f"[images] Seedream не сработал ({last_error}) → fallback")
+    print(f"[images] {IMAGE_MODEL} не сработал ({last_error}) → fallback")
     return None
 
 
