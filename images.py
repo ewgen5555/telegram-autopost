@@ -11,7 +11,7 @@ from datetime import date
 # -------------------------------------------------------------
 AITUNNEL_API_KEY = os.environ.get("AITUNNEL_API_KEY", "").strip()
 AITUNNEL_URL = "https://api.aitunnel.ru/v1/images/generations"
-IMAGE_MODEL = "GPT Image 2.6 Sunburst"
+IMAGE_MODEL = "gpt-image-2.6-sunburst"
 
 MAX_RETRIES = 3
 RETRY_DELAY = 4
@@ -199,6 +199,7 @@ def _call_seedream(prompt: str) -> bytes | str | None:
         "prompt": prompt,
         "resolution": "2K",
         "aspect_ratio": "1:1",
+        "quality": "high",
         "n": 1,
     }
     headers = {
